@@ -1,0 +1,231 @@
+// Finance portal database. This app belongs to ONE department, so there is no
+// tenant/department column anywhere. Money is stored as whole pesewas (Int):
+// GH₵42.50 is 4250. Never floats.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Identity comes from the dues portal (sign-in handoff); the finance ROLE is
+// granted here, explicitly, by the super admin.
+enum FinanceRole {
+  SUPER_ADMIN
+  FINANCIAL_SECRETARY
+  PENDING
+  REVOKED
+}
+
+enum TxType {
+  INCOME
+  EXPENDITURE
+}
+
+enum DuesStatus {
+  SUCCESS
+  REFUNDED
+}
+
+enum DuesPaymentType {
+  FRESHER
+  CONTINUING
+}
+
+enum ProgramStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+}
+
+enum Priority {
+  MUST
+  SHOULD
+  NICE
+}
+
+enum LineKind {
+  COST
+  REVENUE
+}
+
+model User {
+  id          String      @id @default(cuid())
+  // Null until the person first signs in through the dues portal (a
+  // pre-authorized email has no dues id yet).
+  duesUserId  String?     @unique
+  email       String      @unique
+  name        String
+  duesRole    String?
+  financeRole FinanceRole @default(PENDING)
+  lastLoginAt DateTime?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  createdTransactions Transaction[] @relation("TransactionCreatedBy")
+  voidedTransactions  Transaction[] @relation("TransactionVoidedBy")
+  createdPrograms     Program[]     @relation("ProgramCreatedBy")
+  approvedPrograms    Program[]     @relation("ProgramApprovedBy")
+  auditLogs           AuditLog[]
+
+  @@map("users")
+}
+
+// Each sign-in token may be used once.
+model UsedSsoToken {
+  jti       String   @id
+  expiresAt DateTime
+
+  @@index([expiresAt])
+  @@map("used_sso_tokens")
+}
+
+// Half an academic year. Dues payments and manual transactions belong to the
+// semester whose [startDate, endDate] contains their date; semesters never overlap.
+model Semester {
+  id              String   @id @default(cuid())
+  academicSession String // e.g. "2026/2027"
+  number          Int // 1 or 2
+  startDate       DateTime @db.Date
+  endDate         DateTime @db.Date
+  // Amount the super admin sets aside for programs/activities this semester.
+  programsPool    Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  programs Program[]
+
+  @@unique([academicSession, number])
+  @@map("semesters")
+}
+
+// Local copy of a dues-portal payment, keyed by the dues payment id so a
+// replayed or re-synced event never double counts. Only SUCCESS and REFUNDED
+// payments are mirrored; only SUCCESS counts as income.
+model DuesPayment {
+  id                  String          @id // dues payment id
+  amount              Int // pesewas
+  currency            String          @default("GHS")
+  paymentType         DuesPaymentType
+  status              DuesStatus
+  paidAt              DateTime
+  duesUpdatedAt       DateTime
+  academicSessionId   String
+  academicSessionName String
+  syncedAt            DateTime        @default(now())
+
+  changes DuesPaymentChange[]
+
+  @@index([status, paidAt])
+  @@map("dues_payments")
+}
+
+// Visible trail of corrections coming from the dues portal (e.g. a refund).
+model DuesPaymentChange {
+  id         String      @id @default(cuid())
+  paymentId  String
+  payment    DuesPayment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  fromStatus DuesStatus
+  toStatus   DuesStatus
+  fromAmount Int
+  toAmount   Int
+  at         DateTime    @default(now())
+
+  @@index([at])
+  @@map("dues_payment_changes")
+}
+
+model SyncState {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+
+  @@map("sync_state")
+}
+
+// Manually logged money in or out. Never deleted: a mistake is voided with a reason.
+model Transaction {
+  id          String      @id @default(cuid())
+  type        TxType
+  amount      Int // pesewas, always positive
+  date        DateTime    @db.Date
+  description String
+  category    String?
+  programId   String?
+  program     Program?    @relation(fields: [programId], references: [id], onDelete: SetNull)
+  lineId      String?
+  line        BudgetLine? @relation(fields: [lineId], references: [id], onDelete: SetNull)
+  createdById String
+  createdBy   User        @relation("TransactionCreatedBy", fields: [createdById], references: [id])
+  createdAt   DateTime    @default(now())
+  voidedAt    DateTime?
+  voidReason  String?
+  voidedById  String?
+  voidedBy    User?       @relation("TransactionVoidedBy", fields: [voidedById], references: [id])
+
+  @@index([date])
+  @@index([programId])
+  @@map("transactions")
+}
+
+model Program {
+  id           String        @id @default(cuid())
+  semesterId   String
+  semester     Semester      @relation(fields: [semesterId], references: [id], onDelete: Restrict)
+  name         String
+  description  String?
+  priority     Priority      @default(SHOULD)
+  status       ProgramStatus @default(DRAFT)
+  submittedAt  DateTime?
+  approvedAt   DateTime?
+  approvedById String?
+  approvedBy   User?         @relation("ProgramApprovedBy", fields: [approvedById], references: [id])
+  // Why the super admin sent it back, shown to the financial secretary.
+  reviewNote   String?
+  createdById  String
+  createdBy    User          @relation("ProgramCreatedBy", fields: [createdById], references: [id])
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  lines        BudgetLine[]
+  transactions Transaction[]
+
+  @@index([semesterId])
+  @@map("programs")
+}
+
+// One row of a program budget. COST lines are money going out (reserved from the
+// pool up front); REVENUE lines are money expected back in (e.g. shirt sales).
+model BudgetLine {
+  id         String   @id @default(cuid())
+  programId  String
+  program    Program  @relation(fields: [programId], references: [id], onDelete: Cascade)
+  kind       LineKind
+  name       String
+  quantity   Int      @default(1)
+  unitAmount Int // pesewas per unit
+  note       String?
+  sortOrder  Int      @default(0)
+
+  transactions Transaction[]
+
+  @@index([programId])
+  @@map("budget_lines")
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action    String
+  entity    String
+  entityId  String?
+  summary   String?
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@map("audit_logs")
+}

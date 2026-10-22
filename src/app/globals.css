@@ -1,0 +1,49 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --line: rgba(201, 168, 76, 0.25);
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  color: #f3efe6;
+  font-family: "Inter", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  background:
+    radial-gradient(circle at 15% 0%, rgba(122, 46, 158, 0.35), transparent 45%),
+    radial-gradient(circle at 85% 20%, rgba(201, 168, 76, 0.12), transparent 40%),
+    #0b0713;
+  background-attachment: fixed;
+}
+
+h1, h2, h3 { font-family: "Sora", system-ui, sans-serif; }
+
+@layer components {
+  .glass {
+    background: linear-gradient(155deg, rgba(75, 18, 99, 0.35), rgba(20, 11, 34, 0.55));
+    border: 1px solid var(--line);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    @apply rounded-2xl backdrop-blur-xl;
+  }
+  .figure { @apply font-mono tabular-nums; }
+  .label { @apply mb-1 block text-xs font-medium uppercase tracking-wide text-paper/60; }
+  .input {
+    @apply w-full rounded-lg border border-gold/25 bg-ink/60 px-3 py-2 text-sm text-paper placeholder:text-paper/30 focus:border-gold focus:outline-none;
+  }
+  .btn-gold {
+    @apply inline-flex items-center justify-center gap-2 rounded-full border border-white/30 bg-gradient-to-br from-goldBright to-gold px-5 py-2 font-display text-sm font-semibold text-ink transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60;
+  }
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 rounded-full border border-gold/30 px-4 py-1.5 text-sm text-paper/90 transition hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-60;
+  }
+  .btn-danger {
+    @apply inline-flex items-center justify-center gap-2 rounded-full border border-bad/40 px-4 py-1.5 text-sm text-bad transition hover:bg-bad/10 disabled:opacity-60;
+  }
+  .th { @apply px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-paper/50; }
+  .td { @apply px-3 py-2 text-sm align-top; }
+  .nav-link { @apply flex items-center gap-3 rounded-xl px-3 py-2 text-sm text-paper/70 transition hover:bg-white/5 hover:text-paper; }
+  .nav-link-active { @apply bg-gold/10 text-goldBright; }
+}
